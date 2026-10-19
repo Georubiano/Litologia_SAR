@@ -1,0 +1,70 @@
+"""Regenera la carpeta data/ de la app a partir de la base de pozos acotada.
+
+Uso:
+    python preparar_datos.py                      # usa entrada/base_acotada.xlsx
+    python preparar_datos.py ruta/a/otra_base.xlsx
+
+La base tiene que tener las hojas "Pozos" y "Litología" con las columnas de la base acotada
+(Z_boca (m), Inicio/Fin Acotado, Formacion_unificada, Version_tramos, etc.).
+"""
+import json, sys, datetime
+from pathlib import Path
+import numpy as np
+import pandas as pd
+from pyproj import Transformer
+
+from modelo_sar import contactos as ct
+from modelo_sar import modelo as md
+
+AQUI = Path(__file__).parent
+BASE = Path(sys.argv[1]) if len(sys.argv) > 1 else AQUI / "entrada" / "base_acotada.xlsx"
+DATA = AQUI / "data"
+DATA.mkdir(exist_ok=True)
+
+print("Leyendo", BASE)
+pz, lit = ct.leer_base(BASE)
+tramos = ct.tabla_tramos(lit)
+c, k, prob = ct.extraer_contactos(lit)
+topo = ct.topografia(pz)
+print(f"{tramos.Cod_UK.nunique()} pozos con litología, {len(c)} contactos, {len(k)} pozos que no alcanzan una "
+      f"superficie, {len(prob)} con orden invertido")
+
+M = md.construir(c, k, topo, tramos)
+tf = Transformer.from_crs(32721, 4326, always_xy=True)
+
+# esquinas de celdas en lon/lat
+gx, gy = M["gx"], M["gy"]
+cx = np.concatenate([gx - md.CELDA / 2, [gx[-1] + md.CELDA / 2]])
+cy = np.concatenate([gy - md.CELDA / 2, [gy[-1] + md.CELDA / 2]])
+LON, LAT = tf.transform(*np.meshgrid(cx, cy))
+np.savez_compressed(DATA / "grilla.npz", gx=gx, gy=gy, MASK=M["MASK"], SUP=M["SUP"], LON=LON, LAT=LAT)
+
+tr = M["tramos"].copy()
+tr["lon"], tr["lat"] = tf.transform(tr.X.values, tr.Y.values)
+tr["f"] = tr.Formacion.map({f: i for i, f in enumerate(md.ORDEN)}).fillna(-1).astype(int)
+tr.loc[tr.Formacion == "Basamento", "f"] = len(md.ORDEN)
+tr["Litologia"] = tr.Litologia.fillna("").astype(str)
+tr["Formacion"] = tr.Formacion.fillna("Sin dato")
+tr["Fuente"] = tr.Fuente.fillna("Sin dato").astype(str)
+tr.to_parquet(DATA / "tramos.parquet", index=False)
+
+po = tr.groupby("Cod_UK").agg(X=("X", "first"), Y=("Y", "first"), lon=("lon", "first"), lat=("lat", "first"),
+                              cota_boca=("Cota_desde", "max"), prof_total=("Hasta", "max"),
+                              fuente=("Fuente", "first"),
+                              formaciones=("Formacion", lambda s: " | ".join(dict.fromkeys(s)))).reset_index()
+po.to_parquet(DATA / "pozos.parquet", index=False)
+c.to_parquet(DATA / "contactos.parquet", index=False)
+prob.to_csv(DATA / "pozos_orden_invertido.csv", index=False)
+M["outliers"].to_csv(DATA / "outliers_revisar.csv", index=False)
+
+valid = np.where(M["MASK"], np.nan, M["SUP"][-1])
+meta = dict(
+    generado=datetime.datetime.now().isoformat(timespec="minutes"), base=str(BASE.name),
+    formaciones=[{"id": f, "nombre": md.FORM[f][0], "color": md.FORM[f][1]} for f in md.ORDEN],
+    basamento={"nombre": "Basamento", "color": md.FORM["Basamento"][1]}, gris=md.GRIS,
+    excluidos=M["excluidos"], z_min=float(np.nanmin(valid)), celda=md.CELDA, esp_fb=md.ESP_FB,
+    centro=[float(np.mean(LON)), float(np.mean(LAT))],
+    cortes={"A-A' (O-E)": [[505000, 6172000], [578000, 6172000]], "B-B' (S-N)": [[540000, 6152000], [540000, 6193000]]},
+)
+(DATA / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+print("Listo:", sorted(p.name for p in DATA.iterdir()))
