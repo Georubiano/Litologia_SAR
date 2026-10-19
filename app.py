@@ -20,6 +20,13 @@ DATA = AQUI / "data"
 st.set_page_config(page_title="Visor SAR 3D", page_icon="💧", layout="wide")
 
 
+class DeckCompacto(pdk.Deck):
+    """pydeck serializa con sangría (indent=2): con miles de bloques eso duplica el tamaño que viaja al navegador."""
+    def to_json(self):
+        from pydeck.bindings.json_tools import default_serialize
+        return json.dumps(self, sort_keys=True, default=default_serialize, separators=(",", ":"))
+
+
 # ----------------------------------------------------------------------------- datos
 @st.cache_data(show_spinner="Cargando modelo…")
 def cargar():
@@ -29,6 +36,32 @@ def cargar():
     tr = pd.read_parquet(DATA / "tramos.parquet")
     po = pd.read_parquet(DATA / "pozos.parquet")
     return meta, grid, tr, po
+
+
+@st.cache_data(show_spinner=False)
+def cargar_hidro():
+    """Capas hidrogeológicas (si preparar_datos.py las generó)."""
+    if not (DATA / "hidro.npz").exists():
+        return None
+    h = np.load(DATA / "hidro.npz")
+    return dict(capas={k: h[k] for k in h.files}, puntos=pd.read_parquet(DATA / "hidro_puntos.parquet"),
+                mon=pd.read_parquet(DATA / "monitoreo.parquet"), tend=pd.read_csv(DATA / "tendencia_niveles.csv"))
+
+
+SUPS_HIDRO = {  # clave -> (nombre, capa de puntos, unidad)
+    "PIEZO": ("Superficie piezométrica regional (NE)", "NE regional", "m s.n.m."),
+    "PIEZO_MON": ("Superficie piezométrica – monitoreo", "Monitoreo", "m s.n.m."),
+    "NAPA_TOP": ("Techo de la 1ª napa con aporte", "Techo 1ª napa", "m s.n.m."),
+}
+MAPAS_HIDRO = {  # clave -> (título, cmap, unidad, vmin, vmax)
+    "PIEZO": ("Superficie piezométrica regional", "Blues", "m s.n.m.", -5, 45),
+    "PIEZO_MON": ("Superficie piezométrica – monitoreo", "Blues", "m s.n.m.", -5, 45),
+    "PROF_AGUA": ("Profundidad al nivel del agua", "YlOrBr", "m bajo terreno", 0, 30),
+    "SAT": ("Espesor saturado del acuífero (Chuy + Raigón)", "GnBu", "m", 0, 50),
+    "CONF": ("Condición del acuífero (1 = semiconfinado, 0 = libre)", "coolwarm", "", 0, 1),
+    "NAPA_TOP": ("Techo de la 1ª napa con aporte", "viridis", "m s.n.m.", None, None),
+    "LOGT": ("Transmisividad estimada, log10 T (Logan)", "RdYlBu", "log10 m²/d", 0.5, 3),
+}
 
 
 def hex2rgb(h):
@@ -44,10 +77,10 @@ def bloques_base():
     filas = []
     ii, jj = np.where(~MASK)
     for i, j in zip(ii, jj):
-        poly = [[round(float(LON[i, j]), 6), round(float(LAT[i, j]), 6)],
-                [round(float(LON[i, j + 1]), 6), round(float(LAT[i, j + 1]), 6)],
-                [round(float(LON[i + 1, j + 1]), 6), round(float(LAT[i + 1, j + 1]), 6)],
-                [round(float(LON[i + 1, j]), 6), round(float(LAT[i + 1, j]), 6)]]
+        poly = [[round(float(LON[i, j]), 5), round(float(LAT[i, j]), 5)],
+                [round(float(LON[i, j + 1]), 5), round(float(LAT[i, j + 1]), 5)],
+                [round(float(LON[i + 1, j + 1]), 5), round(float(LAT[i + 1, j + 1]), 5)],
+                [round(float(LON[i + 1, j]), 5), round(float(LAT[i + 1, j]), 5)]]
         for k in range(nf):
             top, bot = float(SUP[k, i, j]), float(SUP[k + 1, i, j])
             if top - bot > 0.2:
@@ -60,6 +93,7 @@ def bloques_base():
 
 
 meta, grid, TR, PO = cargar()
+HID = cargar_hidro()
 FORMS = meta["formaciones"]
 NF = len(FORMS)
 COLF = [hex2rgb(f["color"]) for f in FORMS] + [hex2rgb(meta["basamento"]["color"])]
@@ -82,6 +116,20 @@ with sb.expander("Fondo", expanded=True):
     fondo = st.radio("Mapa base", ["Imagen satelital (Esri)", "Mapa de calles (OSM)", "Topográfico (Esri)", "Sin fondo"],
                      label_visibility="collapsed")
     relieve = st.checkbox("Relieve sombreado (Esri)")
+    fondo_arriba = st.checkbox("Mapa sobre el modelo (apoyado en el relieve)", value=True,
+                               help="El mapa se dibuja sobre la superficie del terreno, tapando la litología "
+                                    "interpolada. Bajá la opacidad o usá los recortes para ver el modelo debajo. "
+                                    "Si lo destildás, el mapa queda en un plano por debajo del modelo.")
+    op_fondo = st.slider("Opacidad del mapa", 0.0, 1.0, 0.85, 0.05, disabled=not fondo_arriba)
+
+if HID is not None:
+    with sb.expander("Hidrogeología", expanded=False):
+        sel_hid = {k: st.checkbox(v[0], value=False, key=f"h{k}") for k, v in SUPS_HIDRO.items()}
+        op_hid = st.slider("Opacidad de las superficies", 0.1, 1.0, 0.75, 0.05)
+        pts_hid = st.checkbox("Puntos de dato de las superficies elegidas", value=True)
+        st.caption("Superficies sin bloques: hojas de color por cota. Detalle y mapas en la pestaña «Hidrogeología».")
+else:
+    sel_hid, op_hid, pts_hid = {}, 0.7, False
 
 with sb.expander("Formaciones", expanded=True):
     sel_form = []
@@ -184,24 +232,34 @@ def Z(z):
 
 
 # ----------------------------------------------------------------------------- estilo del mapa base
+FUENTES = {
+    "Imagen satelital (Esri)": ("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                                "Imagen © Esri, Maxar, Earthstar Geographics"),
+    "Mapa de calles (OSM)": ("https://tile.openstreetmap.org/{z}/{x}/{y}.png", "© colaboradores de OpenStreetMap"),
+    "Topográfico (Esri)": ("https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}", "© Esri"),
+}
+HILLSHADE = "https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}"
+# relieve para apoyar el mapa: Terrarium (Mapzen / AWS Open Data), cota = R*256 + G + B/256 - 32768
+TERRARIUM = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+
+
 def estilo_mapa():
-    fuentes = {
-        "Imagen satelital (Esri)": ("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                                    "Imagen © Esri, Maxar, Earthstar Geographics"),
-        "Mapa de calles (OSM)": ("https://tile.openstreetmap.org/{z}/{x}/{y}.png", "© colaboradores de OpenStreetMap"),
-        "Topográfico (Esri)": ("https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}", "© Esri"),
-    }
     sources, layers, attr = {}, [{"id": "fondo", "type": "background", "paint": {"background-color": "#eef0ec"}}], []
-    if fondo in fuentes:
-        url, a = fuentes[fondo]
-        sources["base"] = {"type": "raster", "tiles": [url], "tileSize": 256, "maxzoom": 19}
-        layers.append({"id": "base", "type": "raster", "source": "base"})
-        attr.append(a)
+    if fondo in FUENTES:
+        attr.append(FUENTES[fondo][1])
     if relieve:
-        sources["hill"] = {"type": "raster", "tileSize": 256, "tiles": [
-            "https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}"]}
-        layers.append({"id": "hill", "type": "raster", "source": "hill", "paint": {"raster-opacity": 0.45}})
         attr.append("Relieve © Esri")
+    if fondo_arriba:
+        if fondo in FUENTES or relieve:
+            attr.append("Elevación: Terrarium (AWS Open Data)")
+        estilo = {"version": 8, "sources": sources, "layers": layers}
+        return "data:application/json;charset=utf-8," + urllib.parse.quote(json.dumps(estilo)), " · ".join(attr)
+    if fondo in FUENTES:
+        sources["base"] = {"type": "raster", "tiles": [FUENTES[fondo][0]], "tileSize": 256, "maxzoom": 19}
+        layers.append({"id": "base", "type": "raster", "source": "base"})
+    if relieve:
+        sources["hill"] = {"type": "raster", "tileSize": 256, "tiles": [HILLSHADE]}
+        layers.append({"id": "hill", "type": "raster", "source": "hill", "paint": {"raster-opacity": 0.45}})
     for n, c in enumerate(ss.capas):
         if c["tipo"] == "wms" and c["visible"]:
             sep = "&" if "?" in c["url"] else "?"
@@ -226,6 +284,109 @@ def color_por_campo(serie):
 
 
 # ----------------------------------------------------------------------------- capas deck.gl
+def url_worker():
+    """Worker de loaders.gl servido por la propia app (static/), así no depende de unpkg.com."""
+    try:
+        base = st.context.url or ""
+    except Exception:
+        base = ""
+    base = base.split("?")[0].split("#")[0]
+    if not base.endswith("/"):
+        base += "/"
+    return urllib.parse.urljoin(base, "app/static/terrain-worker.js")
+
+
+def capas_fondo_arriba():
+    """Mapa base (y relieve) apoyado sobre el terreno, con la misma exageración vertical que el modelo."""
+    L = []
+    lift = 3.0   # m: evita que el mapa "pelee" visualmente con el techo del modelo
+    dec = {"rScaler": 256 * ve, "gScaler": ve, "bScaler": ve / 256, "offset": (-32768 - Z_MIN + lift) * ve}
+    texturas = []
+    if fondo in FUENTES:
+        texturas.append(("fondo_t", FUENTES[fondo][0], op_fondo))
+    if relieve:
+        texturas.append(("relieve_t", HILLSHADE, op_fondo * (0.45 if fondo in FUENTES else 1.0)))
+    for n, (lid, tex, op) in enumerate(texturas):
+        d = dict(dec, offset=dec["offset"] + n * 1.0 * ve)
+        L.append(pdk.Layer("TerrainLayer", id=lid, elevation_data=TERRARIUM, texture=tex, elevation_decoder=d,
+                           max_zoom=14, mesh_max_error=2.0 * ve, opacity=op, pickable=False, wireframe=False,
+                           load_options={"terrain": {"workerUrl": url_worker()}}))
+    # WMS: una imagen para toda el área, en un plano apenas por encima del techo del modelo
+    lon, lat = grid["LON"], grid["LAT"]
+    b = [float(lon.min()) - 0.02, float(lat.min()) - 0.02, float(lon.max()) + 0.02, float(lat.max()) + 0.02]
+    z_top = float(Z(np.nanmax(np.where(grid["MASK"], np.nan, grid["SUP"][0])) + 5))
+    for n, c in enumerate(ss.capas):
+        if c["tipo"] == "wms" and c["visible"]:
+            sep = "&" if "?" in c["url"] else "?"
+            ancho = 2048
+            alto = int(ancho * (b[3] - b[1]) / ((b[2] - b[0]) * np.cos(np.radians((b[1] + b[3]) / 2))))
+            url = (f"{c['url']}{sep}SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS={urllib.parse.quote(c['capa'])}"
+                   f"&STYLES=&FORMAT=image/png&TRANSPARENT=true&SRS=EPSG:4326&WIDTH={ancho}&HEIGHT={alto}"
+                   f"&BBOX={b[0]},{b[1]},{b[2]},{b[3]}")
+            L.append(pdk.Layer("BitmapLayer", id=f"wmsb{n}", image=url, opacity=c["opacidad"],
+                               bounds=[[b[0], b[1], z_top], [b[0], b[3], z_top], [b[2], b[3], z_top], [b[2], b[1], z_top]]))
+    return L
+
+
+def _esquinas(G):
+    """Valores en las esquinas de las celdas (promedio de las celdas vecinas válidas)."""
+    ny, nx = G.shape
+    P = np.full((ny + 2, nx + 2), np.nan)
+    P[1:-1, 1:-1] = G
+    st_ = np.stack([P[:-1, :-1], P[:-1, 1:], P[1:, :-1], P[1:, 1:]])
+    with np.errstate(all="ignore"):
+        import warnings
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return np.nanmean(st_, axis=0)          # (ny+1, nx+1)
+
+
+@st.cache_data(show_spinner=False)
+def hoja_superficie(clave, ve_, cn_, ce_):
+    G = HID["capas"][clave]
+    C = _esquinas(G)
+    LON, LAT = grid["LON"], grid["LAT"]
+    nom, _, uni = SUPS_HIDRO[clave]
+    vmin, vmax = np.nanpercentile(G, 2), np.nanpercentile(G, 98)
+    cmap = plt.get_cmap("viridis" if clave == "NAPA_TOP" else "Blues")
+    lat_c = LAT.max() - (LAT.max() - LAT.min()) * cn_ / 100
+    lon_c = LON.max() - (LON.max() - LON.min()) * ce_ / 100
+    filas = []
+    for i, j in zip(*np.where(np.isfinite(G))):
+        if LAT[i, j] > lat_c or LON[i, j] > lon_c:
+            continue
+        zz = [C[i, j], C[i, j + 1], C[i + 1, j + 1], C[i + 1, j]]
+        zz = [G[i, j] if not np.isfinite(z) else z for z in zz]
+        poly = [[round(float(LON[a, b]), 5), round(float(LAT[a, b]), 5), round(float((z - Z_MIN) * ve_), 1)]
+                for (a, b), z in zip([(i, j), (i, j + 1), (i + 1, j + 1), (i + 1, j)], zz)]
+        t = (G[i, j] - vmin) / max(vmax - vmin, 1e-6)
+        col = [int(255 * x) for x in cmap(0.25 + 0.75 * float(np.clip(t, 0, 1)))[:3]]
+        filas.append((poly, col, f"<b>{nom}</b><br>{G[i, j]:.1f} {uni}"))
+    return pd.DataFrame(filas, columns=["poly", "color", "tip"])
+
+
+def capas_hidro():
+    L = []
+    if HID is None:
+        return L
+    PT = HID["puntos"]
+    for clave, (nom, capa_pts, uni) in SUPS_HIDRO.items():
+        if not sel_hid.get(clave):
+            continue
+        d = hoja_superficie(clave, ve, cn, ce)
+        if len(d):
+            L.append(pdk.Layer("SolidPolygonLayer", id=f"hs_{clave}", data=d, get_polygon="poly", extruded=False,
+                               get_fill_color="color", opacity=op_hid, pickable=True))
+        if pts_hid:
+            p = PT[PT.capa.str.startswith(capa_pts) & ~PT.outlier].copy()
+            p = p[(p.lat <= lat_cut) & (p.lon <= lon_cut)]
+            p["pos"] = [[round(x, 6), round(y, 6), round(float(z), 1)] for x, y, z in zip(p.lon, p.lat, Z(p.v))]
+            p["tip"] = [f"<b>{c}</b><br>{nom}: {v:.1f} {uni}" for c, v in zip(p.Cod_UK, p.v)]
+            L.append(pdk.Layer("ScatterplotLayer", id=f"hp_{clave}", data=p[["pos", "tip", "Cod_UK"]],
+                               get_position="pos", get_radius=110, radius_min_pixels=3, get_fill_color=[20, 40, 90],
+                               get_line_color=[255, 255, 255], stroked=True, line_width_min_pixels=1, pickable=True))
+    return L
+
+
 def capas_deck():
     L = []
     for n, c in enumerate(ss.capas):
@@ -251,8 +412,8 @@ def capas_deck():
         lonc = np.array([p[0][0] for p in B.poly]); latc = np.array([p[0][1] for p in B.poly])
         B = B[(latc <= lat_cut) & (lonc <= lon_cut)].copy()
         zb = Z(B.bot.values)
-        B["poly3"] = [[[x, y, float(z)] for x, y in p] for p, z in zip(B.poly, zb)]
-        B["elev"] = B.e * ve
+        B["poly3"] = [[[x, y, round(float(z), 1)] for x, y in p] for p, z in zip(B.poly, zb)]
+        B["elev"] = (B.e * ve).round(1)
         for k in range(NF):
             d = B[B.k == k]
             if len(d):
@@ -266,9 +427,10 @@ def capas_deck():
             hy = grosor / 2 / 111320.0
             hx = hy / np.cos(np.radians(T.lat.values))
             zb = Z(T.Cota_hasta)
-            T["poly"] = [[[x - dx, y - hy, float(z)], [x + dx, y - hy, float(z)], [x + dx, y + hy, float(z)],
-                          [x - dx, y + hy, float(z)]] for x, y, dx, z in zip(T.lon, T.lat, hx, zb)]
-            T["elev"] = (T.Cota_desde - T.Cota_hasta).clip(lower=0.1) * ve
+            T["poly"] = [[[round(x - dx, 6), round(y - hy, 6), round(float(z), 1)], [round(x + dx, 6), round(y - hy, 6), round(float(z), 1)],
+                          [round(x + dx, 6), round(y + hy, 6), round(float(z), 1)], [round(x - dx, 6), round(y + hy, 6), round(float(z), 1)]]
+                         for x, y, dx, z in zip(T.lon, T.lat, hx, zb)]
+            T["elev"] = ((T.Cota_desde - T.Cota_hasta).clip(lower=0.1) * ve).round(1)
             T["color"] = [COLF[f] if 0 <= f <= NF else GRIS for f in T.f]
             T["tip"] = [f"<b>{c}</b><br>{NOMF[f] if 0 <= f <= NF else 'Sin dato / otra'}<br>{d:g}–{h:g} m "
                         f"({z1:.1f} a {z2:.1f} m s.n.m.)<br>Fuente: {fu}<br><i>{l[:80]}</i>"
@@ -279,25 +441,29 @@ def capas_deck():
                                pickable=True, auto_highlight=True))
     if ver_nombres and len(pozos_ok):
         P = pozos_ok.copy()
-        P["pos"] = [[x, y, float(z) + 40] for x, y, z in zip(P.lon, P.lat, Z(P.cota_boca))]
+        P["pos"] = [[x, y, float(z) + 8 * ve] for x, y, z in zip(P.lon, P.lat, Z(P.cota_boca))]
         P["tip"] = [f"<b>{c}</b><br>Prof. total {p:g} m · boca {z:.1f} m s.n.m.<br>{f}"
                     for c, p, z, f in zip(P.Cod_UK, P.prof_total, P.cota_boca, P.fuente)]
         L.append(pdk.Layer("TextLayer", id="nombres", data=P[["pos", "Cod_UK", "tip"]], get_position="pos",
                            get_text="Cod_UK", get_size=12, get_color=[20, 20, 20], background=True,
                            get_background_color=[255, 255, 255, 220], get_text_anchor="'middle'",
                            get_alignment_baseline="'bottom'", billboard=True, pickable=True))
+    L += capas_hidro()
+    if fondo_arriba:
+        L += capas_fondo_arriba()      # al final: se dibuja sobre (y tapa) la litología interpolada
     return L
 
 
 # ----------------------------------------------------------------------------- interfaz principal
 st.markdown("### Modelo conceptual del Sistema Acuífero Raigón – San José")
-tab_mapa, tab_corte, tab_pozo, tab_info = st.tabs(["🗺️ Mapa 3D", "📐 Corte", "🕳️ Pozo", "ℹ️ Acerca del modelo"])
+tab_mapa, tab_corte, tab_pozo, tab_hid, tab_info = st.tabs(["🗺️ Mapa 3D", "📐 Corte", "🕳️ Pozo", "💧 Hidrogeología",
+                                                             "ℹ️ Acerca del modelo"])
 
 with tab_mapa:
     estilo, atribucion = estilo_mapa()
     vista = pdk.ViewState(longitude=meta["centro"][0], latitude=meta["centro"][1], zoom=9.6, pitch=50, bearing=-15,
                           max_pitch=85)
-    deck = pdk.Deck(layers=capas_deck(), initial_view_state=vista, map_style=estilo, map_provider="carto",
+    deck = DeckCompacto(layers=capas_deck(), initial_view_state=vista, map_style=estilo, map_provider="carto",
                     tooltip={"html": "{tip}", "style": {"backgroundColor": "white", "color": "#1d2327",
                                                         "fontSize": "12px", "border": "1px solid #ccc"}})
     ev = st.pydeck_chart(deck, height=720, on_select="rerun",
@@ -350,6 +516,11 @@ with tab_corte:
         buf = st.slider("Proyectar pozos a menos de (m)", 100, 5000, 1500, 100)
         ve_c = st.slider("Exageración vertical del corte", 10, 300, 100, 10)
         nombres_c = st.checkbox("Nombres de pozo en el corte", value=True)
+        ver_hid_corte = {}
+        if HID is not None:
+            ver_hid_corte["PIEZO"] = st.checkbox("Nivel piezométrico regional", value=True)
+            ver_hid_corte["PIEZO_MON"] = st.checkbox("Nivel piezométrico (monitoreo jun-2024)", value=False)
+            ver_hid_corte["NAPA_TOP"] = st.checkbox("Techo de la 1ª napa con aporte", value=False)
     p0, p1 = np.array(p0, float), np.array(p1, float)
     Lng = np.linalg.norm(p1 - p0)
     with c2:
@@ -374,6 +545,15 @@ with tab_corte:
                 ax.fill_between(d, prof[k + 1], prof[k], color=FORMS[k]["color"], lw=0,
                                 label=FORMS[k]["nombre"] + (" (base dibujada)" if k == NF - 1 else ""))
             ax.plot(d, prof[0], "k", lw=0.8)
+            if HID is not None:
+                hz = HID["capas"]
+                for clave, estilo_l, lab in [("PIEZO", dict(color="#1f4e9c", lw=1.6, ls="--"), "Nivel piezométrico regional"),
+                                             ("PIEZO_MON", dict(color="#1f9ce0", lw=1.2, ls=":"), "Nivel piezométrico jun-2024"),
+                                             ("NAPA_TOP", dict(color="#6a1b9a", lw=1.0, ls="-."), "Techo 1ª napa con aporte")]:
+                    if ver_hid_corte.get(clave):
+                        zv = valor_en(hz[clave], xs, ys).astype(float)
+                        zv[m] = np.nan
+                        ax.plot(d, zv, label=lab, zorder=7, **estilo_l)
             u = (p1 - p0) / Lng
             rel = PO[["X", "Y"]].values - p0
             a_ = pd.Series(rel @ u, index=PO.index)
@@ -443,6 +623,84 @@ with tab_pozo:
                            filt.to_csv(index=False).encode("utf-8-sig"), file_name="pozos_filtrados_SAR.csv",
                            mime="text/csv")
 
+# ---- hidrogeología
+with tab_hid:
+    if HID is None:
+        st.info("No hay capas hidrogeológicas: corré `python preparar_datos.py` para generarlas.")
+    else:
+        hm = meta.get("hidro", {})
+        hc, PT, MON, TEND = HID["capas"], HID["puntos"], HID["mon"], HID["tend"]
+        gx, gy = grid["gx"], grid["gy"]
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Pozos con nivel estático", hm.get("n_ne", "–"))
+        k2.metric(f"Red de monitoreo ({hm.get('fecha_mon', '')})", hm.get("n_mon", "–"))
+        k3.metric("Tendencia mediana del nivel", f"{hm.get('tendencia_mediana', float('nan')) * 100:+.1f} cm/año",
+                  help=f"Pendiente de la recta de la carga hidráulica en {hm.get('n_tendencia', '–')} pozos con ≥10 lecturas")
+        conf = hc["CONF"]
+        k4.metric("Área semiconfinada", f"{np.nanmean(conf) * 100:.0f} %",
+                  help="Celdas donde la carga hidráulica supera el techo del acuífero (Libertad actúa como acuitardo)")
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            clave = st.radio("Capa", list(MAPAS_HIDRO), format_func=lambda k: MAPAS_HIDRO[k][0])
+            ver_pts = st.checkbox("Puntos de dato", value=True)
+            ver_flujo = st.checkbox("Dirección de flujo (regional)", value=clave in ("PIEZO", "PIEZO_MON"))
+            ver_out = st.checkbox("Marcar valores descartados (outliers)", value=False)
+        with c2:
+            tit, cmap, uni, vmin, vmax = MAPAS_HIDRO[clave]
+            G = hc[clave]
+            fig, ax = plt.subplots(figsize=(10, 6.2))
+            im = ax.pcolormesh(gx, gy, G, cmap=cmap, shading="auto", vmin=vmin, vmax=vmax)
+            if clave in ("PIEZO", "PIEZO_MON", "NAPA_TOP", "PROF_AGUA", "SAT"):
+                paso = 5 if clave != "PROF_AGUA" else 2.5
+                lv = np.arange(np.floor(np.nanmin(G) / paso) * paso, np.nanmax(G) + paso, paso)
+                cs = ax.contour(gx, gy, G, levels=lv, colors="#2b1a4f", linewidths=0.7)
+                ax.clabel(cs, fmt="%g", fontsize=7)
+            if clave == "SAT":
+                ax.contour(gx, gy, np.nan_to_num(conf, nan=0), levels=[0.5], colors="red", linewidths=1.2)
+            if ver_flujo:
+                s_ = 4
+                GX, GY = np.meshgrid(gx, gy)
+                ax.quiver(GX[::s_, ::s_], GY[::s_, ::s_], -hc["dzx"][::s_, ::s_], -hc["dzy"][::s_, ::s_],
+                          color="#7a3ca8", scale=0.12, width=0.0022)
+            capa_pts = {"PIEZO": "NE regional", "PIEZO_MON": "Monitoreo", "NAPA_TOP": "Techo 1ª napa",
+                        "LOGT": "Transmisividad", "PROF_AGUA": "NE regional", "SAT": "NE regional", "CONF": "NE regional"}[clave]
+            p = PT[PT.capa.str.startswith(capa_pts)]
+            if ver_pts:
+                ax.scatter(p[~p.outlier].X, p[~p.outlier].Y, s=5, c="k", lw=0)
+            if ver_out:
+                ax.scatter(p[p.outlier].X, p[p.outlier].Y, s=18, c="r", marker="x", lw=0.8)
+            plt.colorbar(im, ax=ax, shrink=0.75, label=uni)
+            ax.set_aspect("equal"); ax.ticklabel_format(style="plain"); ax.tick_params(labelsize=7)
+            ax.set_title(tit + ("  ·  rojo: límite semiconfinado" if clave == "SAT" else ""), fontsize=11)
+            fig.tight_layout(); st.pyplot(fig)
+            bpng = io.BytesIO(); fig.savefig(bpng, dpi=200, bbox_inches="tight"); plt.close(fig)
+            d1, d2 = st.columns(2)
+            d1.download_button("Descargar mapa (PNG)", bpng.getvalue(), file_name=f"{clave}_SAR.png", mime="image/png")
+            GX, GY = np.meshgrid(gx, gy)
+            grid_csv = pd.DataFrame({"X": GX.ravel(), "Y": GY.ravel(), clave: G.ravel()}).dropna()
+            d2.download_button("Descargar grilla (CSV X, Y, valor)", grid_csv.to_csv(index=False).encode("utf-8"),
+                               file_name=f"{clave}_grilla_500m.csv", mime="text/csv")
+        st.markdown("#### Hidrogramas de la red de monitoreo")
+        orden = TEND.sort_values("n", ascending=False).Cod_UK.tolist()
+        resto = sorted(set(MON.Cod_UK) - set(orden))
+        sel_p = st.multiselect("Pozos", orden + resto, default=orden[:5])
+        if sel_p:
+            fig, ax = plt.subplots(figsize=(11, 4))
+            for c_ in sel_p:
+                s_ = MON[MON.Cod_UK == c_].sort_values("fecha")
+                ax.plot(s_.fecha, s_.carga, ".-", ms=3, lw=0.9, label=c_)
+            ax.set_ylabel("Carga hidráulica (m s.n.m.)"); ax.grid(alpha=0.3); ax.legend(ncol=5, fontsize=8)
+            fig.tight_layout(); st.pyplot(fig); plt.close(fig)
+        st.dataframe(TEND.sort_values("tendencia_m_anio").rename(columns={
+            "tendencia_m_anio": "Tendencia (m/año)", "amplitud_m": "Oscilación P5–P95 (m)", "n": "Lecturas"}).round(3),
+            hide_index=True)
+        st.download_button("Descargar serie completa de monitoreo (CSV)", MON.to_csv(index=False).encode("utf-8-sig"),
+                           file_name="monitoreo_niveles_SAR.csv", mime="text/csv")
+        st.caption("Superficie regional: NE de perforación y relevamientos de distintas fechas (la mayoría sin fecha); "
+                   "el descenso medio de ~5 cm/año es chico frente a los 40 m de relieve piezométrico, pero localmente "
+                   "puede haber diferencias de varios metros. La superficie de monitoreo es de una sola fecha pero con "
+                   "pocos pozos. Transmisividad: T ≈ 1,22·Q/s (Logan, 1964), solo como orden de magnitud.")
+
 # ---- info
 with tab_info:
     st.markdown(f"""
@@ -459,6 +717,18 @@ que no alcanzan una superficie como restricción. Dentro de la cobertura (Suelo,
 - **Fray Bentos:** ningún pozo llega a su base; se dibuja una lámina de {meta['esp_fb']:g} m.
 - **Pozos excluidos** ({len(meta['excluidos'])}) por cota de boca dudosa (> 15 m de la topografía): {', '.join(meta['excluidos'])}.
 - Celdas a más de 3 km de un pozo con contacto quedan fuera del modelo.
+
+**Capas hidrogeológicas** (pestaña «Hidrogeología» y barra lateral)
+- *Superficie piezométrica regional:* carga = cota de boca − nivel estático (hoja Hidráulica), promediando pozos a
+  menos de 20 m y descartando NE mayores que la profundidad del pozo, NE > 60 m, bocas dudosas y valores anómalos
+  por validación cruzada. Mezcla fechas (la mayoría sin fecha).
+- *Superficie de monitoreo:* misma fecha para todos los pozos (hoja Historico niveles, junio 2024). Las fechas de esa
+  hoja venían mal convertidas por Excel y se reconstruyeron respetando el orden de las columnas.
+- *Techo de la 1ª napa con aporte:* cota del primer horizonte con agua declarado (hoja Ubic. Napas), solo en Chuy,
+  Raigón o pozos sin litología. Se excluyen los datos marcados «no se sabe si es inicio o fin».
+- *Derivadas:* profundidad al agua, espesor saturado (Chuy + Raigón), zona semiconfinada (carga por encima del techo
+  del acuífero), dirección de flujo (gradiente de la superficie regional) y transmisividad por capacidad específica
+  (T ≈ 1,22·Q/s, Logan 1964; orden de magnitud).
 
 Para actualizar el modelo con una base nueva: `python preparar_datos.py ruta/base.xlsx` y recargar la app.
 """)

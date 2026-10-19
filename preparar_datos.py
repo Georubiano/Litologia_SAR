@@ -66,5 +66,26 @@ meta = dict(
     centro=[float(np.mean(LON)), float(np.mean(LAT))],
     cortes={"A-A' (O-E)": [[505000, 6172000], [578000, 6172000]], "B-B' (S-N)": [[540000, 6152000], [540000, 6193000]]},
 )
+# ---- capas hidrogeológicas (piezometría, napas, transmisividad)
+from modelo_sar import hidro
+H, HP, _ = hidro.construir(BASE, {"gx": gx, "gy": gy, "MASK": M["MASK"], "SUP": M["SUP"]}, M["tramos"])
+np.savez_compressed(DATA / "hidro.npz", **H)
+pts = []
+for k in ("ne", "mon", "napa", "T"):
+    d = HP[k].copy()
+    d["lon"], d["lat"] = tf.transform(d.X.values, d.Y.values)
+    pts.append(d[["Cod_UK", "X", "Y", "lon", "lat", "v", "n", "residuo_LOO", "outlier", "capa"]])
+pd.concat(pts).to_parquet(DATA / "hidro_puntos.parquet", index=False)
+mon = HP["monitoreo"][["Cod_UK", "Propietario", "X", "Y", "Z_boca", "fecha", "prof_agua", "carga"]]
+mon.to_parquet(DATA / "monitoreo.parquet", index=False)
+HP["tendencia"].to_csv(DATA / "tendencia_niveles.csv", index=False)
+HP["napas_todas"].to_csv(DATA / "napas_con_formacion.csv", index=False)
+HP["napa_vs_S1"].to_csv(DATA / "napa_vs_techo_acuifero.csv", index=False)
+HP["descartes_ne"].to_csv(DATA / "NE_descartados.csv", index=False)
+meta["hidro"] = {"fecha_mon": "2024-06", "n_ne": int(len(HP["ne"])), "n_mon": int(len(HP["mon"])),
+                 "n_napa": int(len(HP["napa"])), "n_T": int(len(HP["T"])),
+                 "tendencia_mediana": float(HP["tendencia"].tendencia_m_anio.median()),
+                 "n_tendencia": int(len(HP["tendencia"]))}
+
 (DATA / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
 print("Listo:", sorted(p.name for p in DATA.iterdir()))

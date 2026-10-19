@@ -153,6 +153,6 @@ def construir(contactos, no_alcanzados, topo, tramos, log=print):
     techos["Fm Fray Bentos"] = S2 - TH_CAM
     BASE = techos["Fm Fray Bentos"] - ESP_FB
     SUP = np.stack([techos[f] for f in ORDEN] + [BASE])  # (8, ny, nx): techo de cada formación + base
-    return dict(gx=g.gx, gy=g.gy, MASK=MASK, SUP=SUP, TOPO=TOPO, tramos=tr, excluidos=excluidos,
+    return dict(gx=g.gx, gy=g.gy, MASK=MASK, SUP=SUP, TOPO=TOPO, tramos=tr, excluidos=excluidos, grilla=g,
                 outliers=pd.concat([d[d.outlier].assign(Superficie=s) for s, d in
                                     [("Topografía", t), *S.items()]]))

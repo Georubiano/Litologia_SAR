@@ -1,0 +1,8 @@
+Cod_UK,Caudal,NE_m,NE Acotado,ND-m,Fecha,Año,Fuente_x,Observaciones,NE,surgente,ND,anio,X,Y,Z_boca,Fuente_Z,Prof_total,Departamento,Localidad,Fuente_y,carga,descenso,Q_esp,descarte,Z_topo
+UK000584,19.0,95,,17.0,,,Dinagua,,95.0,False,17.0,,543379.5,6158123.3,15.81,"MDT IDE 2,5 m",36.0,San José,,Dinagua,-79.19,-78.0,,NE > 60 m (probable nivel dinámico o error),19.737493569995564
+UK000687,20.0,12,,25.0,,,Dinagua,,12.0,False,25.0,,525621.0,6166961.0,29.38,"MDT IDE 2,5 m",0.0,San José,,Dinagua,17.38,13.0,1.5384615384615385,NE mayor que la profundidad del pozo,31.021981619823322
+UK001450,36.0,20.7,,39.3,,,Dinamige,,20.7,False,39.3,,538160.0,6157307.0,284.0,Z_m,10.0,Tacuarembó,,Dinamige,263.3,18.599999999999998,1.9354838709677422,cota de boca > 15 m de la topografía,21.91886419990024
+UK001170,20.0,14.1,,16.5,,,OSE,,14.1,False,16.5,,522451.0,6160548.0,6.98,"MDT IDE 2,5 m",32.4,San José,Libertad,OSE,-7.119999999999999,2.4000000000000004,8.333333333333332,cota de boca > 15 m de la topografía,32.87431978725515
+UK001170,,1.21,5.87,,,,,PROTEC,1.21,False,,,522451.0,6160548.0,6.98,"MDT IDE 2,5 m",32.4,San José,Libertad,OSE,5.7700000000000005,,,cota de boca > 15 m de la topografía,32.87431978725515
+UK001170,4.8,5.2,,20.5,,,OSE,,5.2,False,20.5,,522451.0,6160548.0,6.98,"MDT IDE 2,5 m",32.4,San José,Libertad,OSE,1.7800000000000002,15.3,0.3137254901960784,cota de boca > 15 m de la topografía,32.87431978725515
+UK001796,20.0,14.1,,16.5,,,OSE,,14.1,False,16.5,,522451.0,6160548.0,6.98,"MDT IDE 2,5 m",26.5,San José,,OSE,-7.119999999999999,2.4000000000000004,8.333333333333332,cota de boca > 15 m de la topografía,32.87431978725515

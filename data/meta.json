@@ -1,5 +1,5 @@
 {
- "generado": "2026-10-16T02:05",
+ "generado": "2026-10-19T15:49",
  "base": "base_acotada.xlsx",
  "formaciones": [
   {
@@ -83,5 +83,14 @@
     6193000
    ]
   ]
+ },
+ "hidro": {
+  "fecha_mon": "2024-06",
+  "n_ne": 937,
+  "n_mon": 29,
+  "n_napa": 254,
+  "n_T": 724,
+  "tendencia_mediana": -0.04774518181013057,
+  "n_tendencia": 61
  }
 }
