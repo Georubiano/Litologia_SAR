@@ -1,0 +1,87 @@
+{
+ "generado": "2026-10-16T02:05",
+ "base": "base_acotada.xlsx",
+ "formaciones": [
+  {
+   "id": "Actual",
+   "nombre": "Suelo / Actual",
+   "color": "#5b3a1e"
+  },
+  {
+   "id": "Fm Dolores",
+   "nombre": "Fm Dolores",
+   "color": "#c9a66b"
+  },
+  {
+   "id": "Fm Libertad",
+   "nombre": "Fm Libertad",
+   "color": "#d98c4a"
+  },
+  {
+   "id": "Fm Chuy",
+   "nombre": "Fm Chuy",
+   "color": "#f2d64b"
+  },
+  {
+   "id": "Fm Raigon",
+   "nombre": "Fm Raigón",
+   "color": "#3b7dd8"
+  },
+  {
+   "id": "Fm Camacho",
+   "nombre": "Fm Camacho",
+   "color": "#5fa35f"
+  },
+  {
+   "id": "Fm Fray Bentos",
+   "nombre": "Fm Fray Bentos",
+   "color": "#e39aa8"
+  }
+ ],
+ "basamento": {
+  "nombre": "Basamento",
+  "color": "#a33a3a"
+ },
+ "gris": "#9a9a9a",
+ "excluidos": [
+  "UK000499",
+  "UK000750",
+  "UK001167",
+  "UK001170",
+  "UK001241",
+  "UK001242",
+  "UK001305",
+  "UK001398",
+  "UK001450",
+  "UK001796"
+ ],
+ "z_min": -80.47004357004073,
+ "celda": 500,
+ "esp_fb": 30.0,
+ "centro": [
+  -56.530029072729405,
+  -34.59362216114704
+ ],
+ "cortes": {
+  "A-A' (O-E)": [
+   [
+    505000,
+    6172000
+   ],
+   [
+    578000,
+    6172000
+   ]
+  ],
+  "B-B' (S-N)": [
+   [
+    540000,
+    6152000
+   ],
+   [
+    540000,
+    6193000
+   ]
+  ]
+ }
+}

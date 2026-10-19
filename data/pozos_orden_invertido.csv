@@ -1,0 +1,18 @@
+Cod_UK,X,Y,Z_boca,Problema,Secuencia
+UK000448,517714.0,6164986.0,11.8,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U1_Cobertura > U2_Acuifero
+UK000463,541444.0,6154656.0,5.75,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U1_Cobertura > U2_Acuifero > U2_Acuifero > U3_Camacho > U3_Camacho
+UK000471,556804.0,6152360.0,6.14,orden estratigráfico invertido,U2_Acuifero > U1_Cobertura
+UK000472,556648.0,6152273.0,4.82,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U1_Cobertura
+UK000489,524022.0,6166501.0,48.44,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U4_FrayBentos > U3_Camacho
+UK000496,537820.0,6165713.0,33.59,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U3_Camacho > U2_Acuifero
+UK000497,541615.0,6154367.0,5.68,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U4_FrayBentos > U3_Camacho
+UK000574,541873.0,6154159.0,6.73,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U3_Camacho > U2_Acuifero
+UK000585,543203.0,6157821.0,13.74,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U1_Cobertura
+UK000799,546272.0,6159122.0,9.45,orden estratigráfico invertido,U2_Acuifero > U1_Cobertura
+UK000806,541409.0,6154187.0,5.65,orden estratigráfico invertido,U1_Cobertura > U4_FrayBentos > U2_Acuifero
+UK000849,532469.0,6168109.0,47.54,orden estratigráfico invertido,U2_Acuifero > U1_Cobertura
+UK000853,533337.0,6168814.0,46.42,orden estratigráfico invertido,U2_Acuifero > U1_Cobertura
+UK001110,549994.0,6158074.0,16.96,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U1_Cobertura > U2_Acuifero > U1_Cobertura
+UK001114,550488.0,6157815.0,14.36,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U1_Cobertura > U2_Acuifero > U3_Camacho
+UK001124,545920.0,6158446.0,9.69,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U4_FrayBentos > U3_Camacho
+UK001312,512668.6,6174167.8,30.0,orden estratigráfico invertido,U1_Cobertura > U2_Acuifero > U1_Cobertura > U2_Acuifero > U2_Acuifero > U2_Acuifero > U3_Camacho
